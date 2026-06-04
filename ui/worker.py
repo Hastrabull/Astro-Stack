@@ -93,8 +93,10 @@ class StackWorker(QThread):
         advance(f"Stackowanie {len(calibrated)} klatek ({self._algorithm})…")
         stack_fn = ALGORITHMS[self._algorithm]
         kwargs = {}
-        if self._algorithm in ("Sigma Clipping", "Kappa-Sigma"):
+        if self._algorithm == "Sigma Clipping":
             kwargs = {"sigma": self._sigma, "iterations": self._iterations}
+        elif self._algorithm == "Kappa-Sigma":
+            kwargs = {"kappa": self._sigma, "iterations": self._iterations}
 
         result = stack_fn(calibrated, **kwargs)
 
