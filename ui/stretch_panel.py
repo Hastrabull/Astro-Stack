@@ -5,7 +5,7 @@ import numpy as np
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
-    QSlider, QLabel, QFormLayout, QPushButton,
+    QLabel, QFormLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView,
     QDoubleSpinBox, QSplitter,
 )
@@ -19,13 +19,55 @@ except ImportError:
     HAS_MPL = False
 
 
-class HistogramCanvas(QWidget):
-    """Embedded matplotlib histogram of the current image."""
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
 
+def _help_btn(chapter_key: str) -> QPushButton:
+    btn = QPushButton("?")
+    btn.setFixedSize(18, 18)
+    btn.setToolTip("Pomoc")
+    btn.setStyleSheet(
+        "QPushButton { border-radius: 9px; background: #3a3a3a; color: #aaa; "
+        "font-weight: bold; font-size: 11px; border: 1px solid #555; }"
+        "QPushButton:hover { background: #4fc3f7; color: #000; }"
+    )
+    btn.clicked.connect(lambda: _open_help(chapter_key))
+    return btn
+
+
+def _open_help(chapter_key: str):
+    from ui.help_dialog import HelpDialog
+    HelpDialog.show_chapter(None, chapter_key)
+
+
+def _row_with_help(widget: QWidget, chapter_key: str) -> QWidget:
+    container = QWidget()
+    layout = QHBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(4)
+    layout.addWidget(widget)
+    layout.addWidget(_help_btn(chapter_key))
+    return container
+
+
+# ---------------------------------------------------------------------------
+# Histogram canvas
+# ---------------------------------------------------------------------------
+
+class HistogramCanvas(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+
+        # Header row with ? button
+        header = QHBoxLayout()
+        header.addWidget(QLabel("Histogram"))
+        header.addStretch()
+        header.addWidget(_help_btn("histogram"))
+        layout.addLayout(header)
+
         if HAS_MPL:
             self._fig = Figure(figsize=(3, 1.5), facecolor="#1e1e1e")
             self._ax = self._fig.add_subplot(111)
@@ -44,9 +86,8 @@ class HistogramCanvas(QWidget):
         self._ax.clear()
         self._ax.set_facecolor("#1e1e1e")
         flat = img.ravel()
-        colors = ["#ff4444", "#44ff44", "#4444ff"] if img.ndim == 3 else ["#aaaaaa"]
         if img.ndim == 3:
-            for c, col in enumerate(colors):
+            for c, col in enumerate(["#ff4444", "#44ff44", "#4444ff"]):
                 self._ax.hist(img[:, :, c].ravel(), bins=256, range=(0, 1),
                               color=col, alpha=0.6, histtype="step", linewidth=0.8)
         else:
@@ -68,15 +109,19 @@ class AutoSTFTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Automatic Screen Transfer Function (PixInsight-style)"))
-        btn = QPushButton("Apply Auto STF")
-        btn.clicked.connect(self.apply_requested)
-        layout.addWidget(btn)
+        layout.addWidget(QLabel("Automatyczny stretch inspirowany PixInsight STF."))
+        btn_row = QHBoxLayout()
+        apply_btn = QPushButton("Apply Auto STF")
+        apply_btn.clicked.connect(self.apply_requested)
+        btn_row.addWidget(apply_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(_help_btn("auto_stf"))
+        layout.addLayout(btn_row)
         layout.addStretch()
 
 
 class LevelsTab(QWidget):
-    changed = pyqtSignal(float, float, float)  # black, white, gamma
+    changed = pyqtSignal(float, float, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -95,18 +140,21 @@ class LevelsTab(QWidget):
         self._white = _spin(0.01, 1.0, 1.0)
         self._gamma = _spin(0.1, 5.0, 1.0, 0.05)
 
-        form.addRow("Black point:", self._black)
-        form.addRow("White point:", self._white)
-        form.addRow("Gamma:", self._gamma)
+        form.addRow("Black point:", _row_with_help(self._black, "levels"))
+        form.addRow("White point:", _row_with_help(self._white, "levels"))
+        form.addRow("Gamma:", _row_with_help(self._gamma, "levels"))
         layout.addLayout(form)
 
+        btn_row = QHBoxLayout()
         apply_btn = QPushButton("Apply")
         apply_btn.clicked.connect(self._emit)
-        layout.addWidget(apply_btn)
-
         reset_btn = QPushButton("Reset")
         reset_btn.clicked.connect(self._reset)
-        layout.addWidget(reset_btn)
+        btn_row.addWidget(apply_btn)
+        btn_row.addWidget(reset_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(_help_btn("levels"))
+        layout.addLayout(btn_row)
         layout.addStretch()
 
     def _emit(self):
@@ -123,14 +171,14 @@ class LevelsTab(QWidget):
 
 
 class CurvesTab(QWidget):
-    changed = pyqtSignal(list)  # list of (x, y) tuples
+    changed = pyqtSignal(list)
 
     DEFAULT_POINTS = [(0.0, 0.0), (0.25, 0.25), (0.5, 0.5), (0.75, 0.75), (1.0, 1.0)]
 
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Control points (input → output):"))
+        layout.addWidget(QLabel("Punkty kontrolne krzywej tonalnej (input → output):"))
 
         self._table = QTableWidget(len(self.DEFAULT_POINTS), 2)
         self._table.setHorizontalHeaderLabels(["Input", "Output"])
@@ -148,6 +196,8 @@ class CurvesTab(QWidget):
         reset_btn.clicked.connect(self._reset)
         btn_row.addWidget(apply_btn)
         btn_row.addWidget(reset_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(_help_btn("curves"))
         layout.addLayout(btn_row)
         layout.addStretch()
 
@@ -181,10 +231,14 @@ class HistEqTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Equalise histogram using cumulative distribution function."))
-        btn = QPushButton("Apply Histogram Equalisation")
-        btn.clicked.connect(self.apply_requested)
-        layout.addWidget(btn)
+        layout.addWidget(QLabel("Wyrównanie histogramu przez dystrybuantę (CDF)."))
+        btn_row = QHBoxLayout()
+        apply_btn = QPushButton("Apply Histogram Equalisation")
+        apply_btn.clicked.connect(self.apply_requested)
+        btn_row.addWidget(apply_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(_help_btn("hist_eq"))
+        layout.addLayout(btn_row)
         layout.addStretch()
 
 
@@ -193,15 +247,19 @@ class HistEqTab(QWidget):
 # ---------------------------------------------------------------------------
 
 class StretchPanel(QWidget):
-    stretch_changed = pyqtSignal(np.ndarray)  # emits stretched image
+    stretch_changed = pyqtSignal(np.ndarray)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
 
-        title = QLabel("<b>Stretch</b>")
-        layout.addWidget(title)
+        # Title with ? for the whole stretch section
+        title_row = QHBoxLayout()
+        title_row.addWidget(QLabel("<b>Stretch</b>"))
+        title_row.addStretch()
+        title_row.addWidget(_help_btn("stretch"))
+        layout.addLayout(title_row)
 
         self._tabs = QTabWidget()
 
@@ -227,7 +285,6 @@ class StretchPanel(QWidget):
         self._source: np.ndarray | None = None
 
     def set_source(self, img: np.ndarray | None):
-        """Set the raw stacked image (before stretch)."""
         self._source = img
         self._histogram.update_histogram(img)
 
