@@ -7,7 +7,8 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
     QLabel, QFormLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView,
-    QDoubleSpinBox, QSplitter,
+    QDoubleSpinBox, QSplitter, QFileDialog, QMessageBox,
+    QDialog, QRadioButton, QButtonGroup, QDialogButtonBox,
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 
@@ -246,6 +247,40 @@ class HistEqTab(QWidget):
 # Main stretch panel
 # ---------------------------------------------------------------------------
 
+class SaveDialog(QDialog):
+    """Format + path selection dialog for saving the stretched image."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Zapisz obraz")
+        self.setFixedWidth(320)
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel("Wybierz format zapisu:"))
+
+        self._jpg = QRadioButton("JPEG (.jpg)  — mniejszy plik, lekka kompresja")
+        self._tiff = QRadioButton("TIFF 16-bit (.tif)  — pełna jakość, bez strat")
+        self._jpg.setChecked(True)
+
+        group = QButtonGroup(self)
+        group.addButton(self._jpg)
+        group.addButton(self._tiff)
+
+        layout.addWidget(self._jpg)
+        layout.addWidget(self._tiff)
+        layout.addSpacing(8)
+
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        layout.addWidget(btns)
+
+    def selected_format(self) -> str:
+        return "tiff" if self._tiff.isChecked() else "jpeg"
+
+
 class StretchPanel(QWidget):
     stretch_changed = pyqtSignal(np.ndarray)
 
@@ -277,45 +312,94 @@ class StretchPanel(QWidget):
         self._histogram = HistogramCanvas()
         layout.addWidget(self._histogram)
 
+        # Reset + Zapisz buttons
+        action_row = QHBoxLayout()
+        self._btn_reset = QPushButton("↺  Reset")
+        self._btn_reset.setToolTip("Usuń wszystkie modyfikacje Stretch i wróć do surowego stacka")
+        self._btn_reset.clicked.connect(self._reset_stretch)
+        self._btn_save = QPushButton("💾  Zapisz")
+        self._btn_save.setToolTip("Zapisz aktualnie wyświetlany obraz (po Stretch)")
+        self._btn_save.clicked.connect(self._save_image)
+        action_row.addWidget(self._btn_reset)
+        action_row.addWidget(self._btn_save)
+        layout.addLayout(action_row)
+
         self._stf_tab.apply_requested.connect(self._apply_stf)
         self._levels_tab.changed.connect(self._apply_levels)
         self._curves_tab.changed.connect(self._apply_curves)
         self._histeq_tab.apply_requested.connect(self._apply_histeq)
 
         self._source: np.ndarray | None = None
+        self._displayed: np.ndarray | None = None
 
     def set_source(self, img: np.ndarray | None):
         self._source = img
+        self._displayed = img
         self._histogram.update_histogram(img)
+
+    def _reset_stretch(self):
+        if self._source is None:
+            return
+        self._displayed = self._source
+        self._histogram.update_histogram(self._source)
+        self.stretch_changed.emit(self._source)
+
+    def _save_image(self):
+        if self._displayed is None:
+            QMessageBox.warning(self, "Brak obrazu", "Najpierw wykonaj stackowanie.")
+            return
+
+        dlg = SaveDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        fmt = dlg.selected_format()
+        if fmt == "tiff":
+            file_filter = "TIFF 16-bit (*.tif *.tiff)"
+            default = "wynik.tif"
+        else:
+            file_filter = "JPEG (*.jpg *.jpeg)"
+            default = "wynik.jpg"
+
+        path, _ = QFileDialog.getSaveFileName(self, "Zapisz obraz", default, file_filter)
+        if not path:
+            return
+
+        try:
+            from export.exporter import save_tiff16, save_jpeg
+            if fmt == "tiff":
+                save_tiff16(self._displayed, path)
+            else:
+                save_jpeg(self._displayed, path)
+            QMessageBox.information(self, "Zapisano", f"Plik zapisany:\n{path}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Błąd zapisu", str(exc))
+
+    def _emit(self, out: np.ndarray):
+        self._displayed = out
+        self._histogram.update_histogram(out)
+        self.stretch_changed.emit(out)
 
     def _apply_stf(self):
         if self._source is None:
             return
         from core.stretch import auto_stf
-        out = auto_stf(self._source)
-        self._histogram.update_histogram(out)
-        self.stretch_changed.emit(out)
+        self._emit(auto_stf(self._source))
 
     def _apply_levels(self, black: float, white: float, gamma: float):
         if self._source is None:
             return
         from core.stretch import apply_levels
-        out = apply_levels(self._source, black, white, gamma)
-        self._histogram.update_histogram(out)
-        self.stretch_changed.emit(out)
+        self._emit(apply_levels(self._source, black, white, gamma))
 
     def _apply_curves(self, points):
         if self._source is None:
             return
         from core.stretch import apply_curves
-        out = apply_curves(self._source, points)
-        self._histogram.update_histogram(out)
-        self.stretch_changed.emit(out)
+        self._emit(apply_curves(self._source, points))
 
     def _apply_histeq(self):
         if self._source is None:
             return
         from core.stretch import hist_eq
-        out = hist_eq(self._source)
-        self._histogram.update_histogram(out)
-        self.stretch_changed.emit(out)
+        self._emit(hist_eq(self._source))
