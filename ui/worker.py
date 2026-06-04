@@ -1,5 +1,6 @@
 """Background worker for the stacking pipeline."""
 
+import time
 from typing import List, Dict
 import numpy as np
 
@@ -11,8 +12,9 @@ from core.stacking import ALGORITHMS
 
 
 class StackWorker(QThread):
-    progress = pyqtSignal(int, str)     # percent, message
-    finished = pyqtSignal(np.ndarray)   # result image
+    # percent (0-100), message, elapsed_seconds, estimated_remaining_seconds
+    progress = pyqtSignal(int, str, float, float)
+    finished = pyqtSignal(np.ndarray)
     error = pyqtSignal(str)
 
     def __init__(
@@ -36,9 +38,9 @@ class StackWorker(QThread):
 
     def _run(self):
         lights = self._paths.get("Lights", [])
-        darks = self._paths.get("Darks", [])
-        bias = self._paths.get("Bias", [])
-        flats = self._paths.get("Flats", [])
+        darks  = self._paths.get("Darks",  [])
+        bias   = self._paths.get("Bias",   [])
+        flats  = self._paths.get("Flats",  [])
 
         if not lights:
             self.error.emit("No Light frames loaded.")
@@ -46,47 +48,56 @@ class StackWorker(QThread):
 
         total_steps = len(bias) + len(darks) + len(flats) + len(lights) + 3
         step = 0
+        t_start = time.monotonic()
 
         def advance(msg: str):
             nonlocal step
             step += 1
-            self.progress.emit(int(step / total_steps * 100), msg)
+            pct = int(step / total_steps * 100)
+            elapsed = time.monotonic() - t_start
+            if pct > 0:
+                remaining = elapsed / pct * (100 - pct)
+            else:
+                remaining = 0.0
+            self.progress.emit(pct, msg, elapsed, remaining)
 
         # --- Calibration masters ---
-        advance("Building Master Bias…")
+        advance("Przygotowywanie…")
         master_bias = None
         if bias:
-            for i, p in enumerate(bias):
-                advance(f"Loading bias {i+1}/{len(bias)}")
+            for i in range(len(bias)):
+                advance(f"Wczytywanie Bias {i+1}/{len(bias)}…")
             master_bias = build_master_bias(bias)
 
         master_dark = None
         if darks:
-            for i, p in enumerate(darks):
-                advance(f"Loading dark {i+1}/{len(darks)}")
+            for i in range(len(darks)):
+                advance(f"Wczytywanie Dark {i+1}/{len(darks)}…")
             master_dark = build_master_dark(darks, master_bias)
 
         master_flat = None
         if flats:
-            for i, p in enumerate(flats):
-                advance(f"Loading flat {i+1}/{len(flats)}")
+            for i in range(len(flats)):
+                advance(f"Wczytywanie Flat {i+1}/{len(flats)}…")
             master_flat = build_master_flat(flats)
 
         # --- Load and calibrate lights ---
         calibrated = []
         for i, p in enumerate(lights):
-            advance(f"Loading light {i+1}/{len(lights)}")
+            advance(f"Wczytywanie Light {i+1}/{len(lights)}…")
             frame = load_image(p)
             frame = calibrate_light(frame, master_dark, master_flat)
             calibrated.append(frame)
 
         # --- Stack ---
-        advance(f"Stacking {len(calibrated)} frames with {self._algorithm}…")
+        advance(f"Stackowanie {len(calibrated)} klatek ({self._algorithm})…")
         stack_fn = ALGORITHMS[self._algorithm]
         kwargs = {}
         if self._algorithm in ("Sigma Clipping", "Kappa-Sigma"):
             kwargs = {"sigma": self._sigma, "iterations": self._iterations}
 
         result = stack_fn(calibrated, **kwargs)
-        self.progress.emit(100, "Done.")
+
+        elapsed = time.monotonic() - t_start
+        self.progress.emit(100, f"Gotowe! Czas: {elapsed:.1f}s", elapsed, 0.0)
         self.finished.emit(result)
