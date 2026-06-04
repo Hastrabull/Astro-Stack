@@ -22,8 +22,13 @@ def detect_stars(img: np.ndarray) -> StarDetectResult:
     Downsamples to MAX_SIDE on the longer axis for speed.
     Returns n_stars, median_fwhm (in original-image pixels), std_fwhm, snr.
     """
-    from astropy.stats import sigma_clipped_stats
-    from photutils.detection import IRAFStarFinder
+    try:
+        from astropy.stats import sigma_clipped_stats
+        from photutils.detection import IRAFStarFinder
+    except Exception as e:
+        # Fallback: return SNR only if photutils/astropy metadata missing
+        snr = float(np.mean(img)) / (float(np.std(img)) + 1e-9)
+        return StarDetectResult(n_stars=0, median_fwhm=0.0, std_fwhm=0.0, snr=round(snr, 2))
 
     # Convert colour → luminance
     gray = img.mean(axis=2).astype(np.float32) if img.ndim == 3 else img.astype(np.float32)
