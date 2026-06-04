@@ -6,7 +6,7 @@ import numpy as np
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QSplitter, QProgressBar, QLabel,
-    QFileDialog, QMessageBox, QFrame, QPlainTextEdit,
+    QFileDialog, QMessageBox, QFrame, QPlainTextEdit, QDialog,
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QFont
@@ -221,12 +221,32 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Brak Lights", "Dodaj klatki Light przed stackowaniem.")
             return
 
+        from ui.prestack_dialog import PreStackDialog
+        dlg = PreStackDialog(paths["Lights"], parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        selected = dlg.selected_paths()
+        if not selected:
+            QMessageBox.warning(self, "Brak klatek", "Wszystkie klatki zostały odznaczone.")
+            return
+
+        paths["Lights"] = selected
+
         self._stack_panel.set_enabled(False)
         self._bottom.reset()
         self._bottom.clear_log()
-        self._bottom.log(f"Rozpoczynanie stackowania ({algorithm})…")
+        self._bottom.log(
+            f"Rozpoczynanie stackowania ({algorithm}) — "
+            f"{len(selected)} klatek, normalizacja: {dlg.normalization()}, "
+            f"wątki: {dlg.n_threads()}"
+        )
 
-        self._worker = StackWorker(paths, algorithm, sigma, iterations)
+        self._worker = StackWorker(
+            paths, algorithm, sigma, iterations,
+            normalization=dlg.normalization(),
+            n_threads=dlg.n_threads(),
+        )
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_stack_finished)
         self._worker.error.connect(self._on_stack_error)

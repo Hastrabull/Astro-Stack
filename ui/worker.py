@@ -2,6 +2,7 @@
 
 import time
 from typing import List, Dict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -13,10 +14,9 @@ from core.stacking import ALGORITHMS
 
 class StackWorker(QThread):
     # percent (0-100), message, elapsed_seconds, estimated_remaining_seconds
-    # percent == -1  →  tryb nieokreślony (pulsujący pasek)
-    progress  = pyqtSignal(int, str, float, float)
-    finished  = pyqtSignal(np.ndarray)
-    error     = pyqtSignal(str)
+    progress = pyqtSignal(int, str, float, float)
+    finished = pyqtSignal(np.ndarray)
+    error    = pyqtSignal(str)
 
     def __init__(
         self,
@@ -24,12 +24,16 @@ class StackWorker(QThread):
         algorithm: str,
         sigma: float,
         iterations: int,
+        normalization: str = "none",   # "none" | "median" | "first"
+        n_threads: int = 4,
     ):
         super().__init__()
-        self._paths      = paths
-        self._algorithm  = algorithm
-        self._sigma      = sigma
-        self._iterations = iterations
+        self._paths         = paths
+        self._algorithm     = algorithm
+        self._sigma         = sigma
+        self._iterations    = iterations
+        self._normalization = normalization
+        self._n_threads     = n_threads
 
     def run(self):
         try:
@@ -44,66 +48,94 @@ class StackWorker(QThread):
         flats  = self._paths.get("Flats",  [])
 
         if not lights:
-            self.error.emit("No Light frames loaded.")
+            self.error.emit("Brak klatek Light do stackowania.")
             return
 
-        # Total deterministic steps = loading steps
-        load_steps  = len(bias) + len(darks) + len(flats) + len(lights) + 1
-        # Last 30% reserved for stacking iterations (or single pass for mean/median)
         LOAD_PCT_MAX = 70
-        t_start = time.monotonic()
-        step = 0
+        load_steps   = len(bias) + len(darks) + len(flats) + len(lights) + 1
+        step         = 0
+        t_start      = time.monotonic()
 
-        def advance_load(msg: str):
+        def advance(msg: str):
             nonlocal step
             step += 1
-            pct     = int(step / load_steps * LOAD_PCT_MAX)
-            elapsed = time.monotonic() - t_start
-            # Estimate remaining only from loading portion
-            remaining = (elapsed / max(pct, 1)) * (100 - pct) if pct > 0 else 0.0
+            pct       = int(step / load_steps * LOAD_PCT_MAX)
+            elapsed   = time.monotonic() - t_start
+            remaining = (elapsed / max(pct, 1)) * (100 - pct)
             self.progress.emit(pct, msg, elapsed, remaining)
 
         def advance_stack(current: int, total: int):
-            """Called per stacking iteration."""
-            pct     = LOAD_PCT_MAX + int(current / total * (100 - LOAD_PCT_MAX))
-            elapsed = time.monotonic() - t_start
-            iter_elapsed = elapsed - self._stack_start
-            iter_remaining = (iter_elapsed / current) * (total - current) if current > 0 else 0.0
+            pct       = LOAD_PCT_MAX + int(current / total * (100 - LOAD_PCT_MAX))
+            elapsed   = time.monotonic() - t_start
+            iter_el   = elapsed - self._stack_start
+            remaining = (iter_el / current) * (total - current) if current > 0 else 0.0
             self.progress.emit(
                 pct,
                 f"Stackowanie — iteracja {current}/{total}…",
                 elapsed,
-                iter_remaining,
+                remaining,
             )
 
         # --- Calibration masters ---
-        advance_load("Przygotowywanie…")
+        advance("Przygotowywanie…")
 
         master_bias = None
         if bias:
             for i in range(len(bias)):
-                advance_load(f"Wczytywanie Bias {i+1}/{len(bias)}…")
+                advance(f"Wczytywanie Bias {i+1}/{len(bias)}…")
             master_bias = build_master_bias(bias)
 
         master_dark = None
         if darks:
             for i in range(len(darks)):
-                advance_load(f"Wczytywanie Dark {i+1}/{len(darks)}…")
+                advance(f"Wczytywanie Dark {i+1}/{len(darks)}…")
             master_dark = build_master_dark(darks, master_bias)
 
         master_flat = None
         if flats:
             for i in range(len(flats)):
-                advance_load(f"Wczytywanie Flat {i+1}/{len(flats)}…")
+                advance(f"Wczytywanie Flat {i+1}/{len(flats)}…")
             master_flat = build_master_flat(flats)
 
-        # --- Load and calibrate lights ---
-        calibrated = []
-        for i, p in enumerate(lights):
-            advance_load(f"Wczytywanie Light {i+1}/{len(lights)}…")
-            frame = load_image(p)
+        # --- Load and calibrate lights (parallel) ---
+        calibrated: List[np.ndarray | None] = [None] * len(lights)
+
+        def load_one(args):
+            idx, path = args
+            frame = load_image(path)
             frame = calibrate_light(frame, master_dark, master_flat)
-            calibrated.append(frame)
+            return idx, frame
+
+        loaded_count = 0
+        with ThreadPoolExecutor(max_workers=self._n_threads) as ex:
+            futures = {ex.submit(load_one, (i, p)): i for i, p in enumerate(lights)}
+            for fut in as_completed(futures):
+                idx, frame = fut.result()
+                calibrated[idx] = frame
+                loaded_count += 1
+                advance(f"Wczytywanie Light {loaded_count}/{len(lights)}…")
+
+        calibrated = [f for f in calibrated if f is not None]
+
+        # --- Normalization ---
+        if self._normalization == "median" and len(calibrated) > 1:
+            self.progress.emit(LOAD_PCT_MAX, "Normalizacja do mediany…",
+                               time.monotonic() - t_start, 0.0)
+            medians = [float(np.median(f)) for f in calibrated]
+            ref     = float(np.median(medians))
+            calibrated = [
+                np.clip(f * (ref / m), 0, 1).astype(np.float32) if m > 0 else f
+                for f, m in zip(calibrated, medians)
+            ]
+        elif self._normalization == "first" and len(calibrated) > 1:
+            self.progress.emit(LOAD_PCT_MAX, "Normalizacja do pierwszej klatki…",
+                               time.monotonic() - t_start, 0.0)
+            ref = float(np.median(calibrated[0]))
+            calibrated = [
+                np.clip(f * (ref / float(np.median(f))), 0, 1).astype(np.float32)
+                if float(np.median(f)) > 0 else f
+                for f in calibrated
+            ]
 
         # --- Stack ---
         is_iterative = self._algorithm in ("Sigma Clipping", "Kappa-Sigma")
@@ -114,8 +146,7 @@ class StackWorker(QThread):
             LOAD_PCT_MAX,
             f"Stackowanie {len(calibrated)} klatek ({self._algorithm})"
             + (f" — {iters} iteracji…" if is_iterative else "…"),
-            elapsed,
-            0.0,
+            elapsed, 0.0,
         )
 
         self._stack_start = time.monotonic()
