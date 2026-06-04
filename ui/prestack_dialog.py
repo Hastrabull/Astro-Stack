@@ -112,6 +112,8 @@ class FrameLoader(QThread):
 # ---------------------------------------------------------------------------
 
 class FramesTab(QWidget):
+    analysis_finished = pyqtSignal()
+
     def __init__(self, paths: List[str], n_threads: int, parent=None):
         super().__init__(parent)
         self._paths      = paths
@@ -277,6 +279,7 @@ class FramesTab(QWidget):
         self._load_bar.setFormat("Analiza zakończona ✓")
         self._load_bar.setValue(self._load_bar.maximum())
         self._update_ranks()
+        self.analysis_finished.emit()
 
     def _status(self, snr: float, fwhm: float, n_stars: int):
         if snr < 2.0:
@@ -525,10 +528,19 @@ class PreStackDialog(QDialog):
             QDialogButtonBox.StandardButton.Ok |
             QDialogButtonBox.StandardButton.Cancel
         )
-        btns.button(QDialogButtonBox.StandardButton.Ok).setText("▶  Rozpocznij stackowanie")
+        self._ok_btn = btns.button(QDialogButtonBox.StandardButton.Ok)
+        self._ok_btn.setText("▶  Rozpocznij stackowanie")
+        self._ok_btn.setEnabled(False)
+        self._ok_btn.setToolTip("Poczekaj na zakończenie analizy klatek…")
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         layout.addWidget(btns)
+
+        self._frame_tab.analysis_finished.connect(self._on_analysis_finished)
+
+    def _on_analysis_finished(self):
+        self._ok_btn.setEnabled(True)
+        self._ok_btn.setToolTip("")
 
     def selected_paths(self) -> List[str]:
         return self._frame_tab.selected_paths()
