@@ -6,7 +6,7 @@ import numpy as np
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QSplitter, QProgressBar, QLabel,
-    QFileDialog, QMessageBox, QFrame, QPlainTextEdit, QDialog,
+    QFileDialog, QMessageBox, QFrame, QPlainTextEdit, QDialog, QSizePolicy,
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QFont
@@ -190,11 +190,15 @@ class MainWindow(QMainWindow):
         left_layout.setSpacing(4)
 
         self._frames_panel = FramesPanel()
-        left_layout.addWidget(self._frames_panel)
+        left_layout.addWidget(self._frames_panel, stretch=1)
 
         self._stack_panel = StackPanel()
         self._stack_panel.stack_requested.connect(self._on_stack_requested)
-        left_layout.addWidget(self._stack_panel)
+        self._stack_panel.setSizePolicy(
+            self._stack_panel.sizePolicy().horizontalPolicy(),
+            QSizePolicy.Policy.Maximum,
+        )
+        left_layout.addWidget(self._stack_panel, stretch=0)
 
         left.setMinimumWidth(240)
         left.setMaximumWidth(340)

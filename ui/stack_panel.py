@@ -77,8 +77,8 @@ class StackPanel(QWidget):
         self._btn_stack.setStyleSheet("font-weight: bold; font-size: 14px;")
         self._btn_stack.clicked.connect(self._emit_stack)
         layout.addWidget(self._btn_stack)
+        layout.setContentsMargins(4, 4, 4, 8)
 
-        layout.addStretch()
         self._on_algo_changed(self._algo.currentText())
 
     def _on_algo_changed(self, name: str):
