@@ -1,0 +1,48 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"   # uruchamia się gdy wypchniesz tag np. v1.0.0
+
+permissions:
+  contents: write  # potrzebne do tworzenia Release
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Build EXE
+        run: pyinstaller astrostack.spec
+
+      - name: Upload Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "AstroStack ${{ github.ref_name }}"
+          body: |
+            ## AstroStack ${{ github.ref_name }}
+
+            Pojedynczy plik EXE — nie wymaga instalacji Pythona ani żadnych bibliotek.
+
+            ### Instalacja
+            1. Pobierz `AstroStack.exe`
+            2. Uruchom — przy pierwszym starcie może potrwać kilka sekund
+
+            ### Obsługiwane formaty
+            - Pliki FITS: `.fit` `.fits` `.fts`
+            - Pliki RAW: `.cr3` `.cr2` `.nef` `.arw` `.dng` `.raf` `.orf` `.rw2`
+          files: dist/AstroStack.exe
+          draft: false
+          prerelease: false
