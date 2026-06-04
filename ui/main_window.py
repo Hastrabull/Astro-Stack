@@ -183,21 +183,31 @@ class MainWindow(QMainWindow):
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
+        # Left: frames + stack settings
+        left = QWidget()
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(4)
+
         self._frames_panel = FramesPanel()
-        self._frames_panel.setMinimumWidth(220)
-        self._frames_panel.setMaximumWidth(320)
-        splitter.addWidget(self._frames_panel)
-
-        self._preview = PreviewWidget()
-        splitter.addWidget(self._preview)
-
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(4, 4, 4, 4)
+        left_layout.addWidget(self._frames_panel)
 
         self._stack_panel = StackPanel()
         self._stack_panel.stack_requested.connect(self._on_stack_requested)
-        right_layout.addWidget(self._stack_panel)
+        left_layout.addWidget(self._stack_panel)
+
+        left.setMinimumWidth(240)
+        left.setMaximumWidth(340)
+        splitter.addWidget(left)
+
+        # Center: preview
+        self._preview = PreviewWidget()
+        splitter.addWidget(self._preview)
+
+        # Right: stretch only
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(4, 4, 4, 4)
 
         self._stretch_panel = StretchPanel()
         self._stretch_panel.stretch_changed.connect(self._on_stretch_changed)
@@ -207,7 +217,7 @@ class MainWindow(QMainWindow):
         right.setMaximumWidth(360)
         splitter.addWidget(right)
 
-        splitter.setSizes([260, 720, 300])
+        splitter.setSizes([280, 680, 300])
         main_layout.addWidget(splitter)
 
         root_layout.addWidget(main_widget, stretch=1)
