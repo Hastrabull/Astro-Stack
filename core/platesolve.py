@@ -3,7 +3,12 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
+import math
 import numpy as np
+
+# tetra3 uses numpy.math which was removed in numpy 2.0
+if not hasattr(np, 'math'):
+    np.math = math
 
 
 @dataclass
