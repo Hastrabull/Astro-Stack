@@ -157,6 +157,12 @@ class MainWindow(QMainWindow):
         export_menu.addAction(act_png)
         export_menu.addAction(act_jpg)
 
+        tools_menu = mb.addMenu("Narzędzia")
+        act_solve = QAction("🔭  Plate Solving…", self)
+        act_solve.setToolTip("Identyfikuj pole gwiazd i wyznacz RA/Dec centrum kadru")
+        act_solve.triggered.connect(self._open_plate_solve)
+        tools_menu.addAction(act_solve)
+
         view_menu = mb.addMenu("View")
         act_fit = QAction("Fit image to window", self)
         act_fit.triggered.connect(lambda: self._preview.reset_zoom())
@@ -264,6 +270,17 @@ class MainWindow(QMainWindow):
         h, w = result.shape[:2]
         ch = "RGB" if result.ndim == 3 else "Mono"
         self._bottom.log(f"Stack gotowy — {w}×{h}px, {ch}")
+        self._bottom.log("Możesz teraz uruchomić Plate Solving z menu Narzędzia.")
+
+    def _open_plate_solve(self):
+        img = self._stacked_img if self._stacked_img is not None else self._displayed_img
+        if img is None:
+            QMessageBox.warning(self, "Brak obrazu",
+                                "Najpierw wykonaj stackowanie, a następnie uruchom Plate Solving.")
+            return
+        from ui.platesolve_dialog import PlateSolveDialog
+        dlg = PlateSolveDialog(img, parent=self)
+        dlg.show()
 
     def _on_stack_error(self, msg: str):
         QMessageBox.critical(self, "Błąd stackowania", msg)
